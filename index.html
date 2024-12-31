@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+
+<title>PA#2</title>
+<style>
+    body {
+        background-color: #EEEEEE;
+    }
+</style>
+<script src="./Utils/trackball-rotator.js"></script>
+<script src="./Utils/m4.js"></script>
+<script src="./shader.gpu"></script>
+<script src="./main.js"></script>
+</head>
+<body onload="init()">
+<input type="range" id="uGranularity" min="1" max="100" value="50" oninput="updateSurface()">
+<input type="range" id="vGranularity" min="1" max="100" value="50" oninput="updateSurface()">   
+
+<p id="message">Drag your mouse on the figure to rotate it.<br>
+(On a touch screen, you can use your finger.)</p>
+
+<div id="canvas-holder">
+   <canvas width="600" height="600" id="webglcanvas" style="background-color:red"></canvas>
+</div>
+<img id="diffuse" src="diffuse.png" style="display:none">
+<img id="specular" src="specular.png" style="display:none">
+<img id="normal" src="normal.png" style="display:none">
+
+
+
+</body></html>

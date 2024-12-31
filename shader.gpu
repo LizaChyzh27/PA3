@@ -1,0 +1,80 @@
+// Вершинний шейдер
+const vertexShaderSource = `
+attribute vec3 vertex;           // Вершина об'єкта
+attribute vec3 normal;           // Нормаль до поверхні
+attribute vec2 texCoord;         // Текстурні координати
+
+uniform mat4 ModelViewProjectionMatrix;  // Матрична трансформація для переходу до простору кліпу
+uniform mat4 ModelViewMatrix;           // Матрична трансформація для простору моделі
+uniform mat3 NormalMatrix;              // Матрична трансформація нормалей
+
+varying vec3 vNormal;                 // Передача нормалей у фрагментний шейдер
+varying vec3 vPosition;               // Передача позицій вершин у фрагментний шейдер
+varying vec2 vTexCoord;               // Передача текстурних координат
+
+void main() {
+    // Перетворення нормалі у простір моделі
+    vNormal = normalize(NormalMatrix * normal);
+
+    // Обчислення позиції вершини у просторі моделі
+    vPosition = (ModelViewMatrix * vec4(vertex, 1.0)).xyz;
+
+    // Передача текстурних координат
+    vTexCoord = texCoord;
+
+    // Перетворення вершини у простір кліпу для малювання
+    gl_Position = ModelViewProjectionMatrix * vec4(vertex, 1.0);
+}
+
+`;
+
+// Фрагментний шейдер
+const fragmentShaderSource = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+   precision highp float;
+#else
+   precision mediump float;
+#endif
+
+uniform sampler2D diffuseTexture;  // Дифузна текстура
+uniform sampler2D specularTexture; // Текстура спекулярності
+uniform sampler2D normalTexture;   // Текстура нормалей
+
+uniform vec3 lightPosition;         // Позиція джерела світла
+uniform vec3 viewPosition;          // Позиція спостерігача
+uniform float ambientStrength;      // Сила ambient освітлення
+uniform float specularStrength;     // Сила спекулярного освітлення
+uniform float shininess;            // Шорсткість поверхні
+
+varying vec3 vNormal;               // Інтерпольовані нормалі з вершини
+varying vec3 vPosition;             // Інтерпольовані позиції вершин
+varying vec2 vTexCoord;             // Інтерпольовані текстурні координати
+
+void main() {
+    // Отримання нормалі з нормальної текстури (в діапазоні [-1, 1])
+    vec3 normal = texture2D(normalTexture, vTexCoord).rgb * 2.0 - 1.0;
+
+    // Обчислення векторів
+    vec3 lightDir = normalize(lightPosition - vPosition);  // Вектор до світла
+    vec3 viewDir = normalize(viewPosition - vPosition);    // Вектор до спостерігача
+
+    // Ambient освітлення
+    vec3 ambient = ambientStrength * texture2D(diffuseTexture, vTexCoord).rgb;
+
+    // Дифузне освітлення
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 diffuse = diff * texture2D(diffuseTexture, vTexCoord).rgb;
+
+    // Спекулярне освітлення
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
+    vec3 specular = specularStrength * spec * texture2D(specularTexture, vTexCoord).rgb;
+
+    // Підсумковий колір
+    vec3 finalColor = ambient + diffuse + specular;
+
+    gl_FragColor = vec4(finalColor, 1.0);  // Піксельний колір
+}
+
+`;
+
