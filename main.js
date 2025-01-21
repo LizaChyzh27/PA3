@@ -16,6 +16,7 @@ function Model(name) {
     this.iNormalBuffer = gl.createBuffer();
     this.iIndexBuffer = gl.createBuffer();
     this.iTexCoordBuffer = gl.createBuffer();
+    this.iTangentBuffer = gl.createBuffer();
     this.count = 0;
 
     // Запис даних у буфери
@@ -32,6 +33,9 @@ function Model(name) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iTexCoordBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.texCoordList), gl.STATIC_DRAW);
 
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iTangentBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.tangentList), gl.STATIC_DRAW);
+
         this.count = data.indexList.length;
     };
 
@@ -46,15 +50,20 @@ function Model(name) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iNormalBuffer);
         gl.vertexAttribPointer(shProgram.iAttribNormal, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(shProgram.iAttribNormal);
-        
-        // Індекси
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.iIndexBuffer);
-        gl.drawElements(gl.TRIANGLES, this.count, gl.UNSIGNED_SHORT, 0);
+
+        // Тангенси
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iTangentBuffer);
+        gl.vertexAttribPointer(shProgram.iAttribTangent, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(shProgram.iAttribTangent);
 
         // Текстурні координати
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iTexCoordBuffer);
         gl.vertexAttribPointer(shProgram.iAttribTexCoord, 2, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(shProgram.iAttribTexCoord);
+
+        // Індекси
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.iIndexBuffer);
+        gl.drawElements(gl.TRIANGLES, this.count, gl.UNSIGNED_SHORT, 0);
     };
 }
 
@@ -65,13 +74,12 @@ function ShaderProgram(name, program) {
 
     this.iAttribVertex = -1;
     this.iAttribNormal = -1;
-    this.iColor = -1;
-    this.iModelViewProjectionMatrix = -1;
-    this.iLightPosition = -1;
+    this.iAttribTangent = -1;
     this.iAttribTexCoord = gl.getAttribLocation(this.prog, 'texCoord');
+    this.iModelViewProjectionMatrix = -1;
+    this.iNormalMatrix = -1;
+    this.iLightPosition = -1;
 
-
-    // Використання програми шейдерів
     this.Use = function() {
         gl.useProgram(this.prog);
     };
@@ -100,6 +108,7 @@ function draw() {
 
     // Створюємо матрицю моделі-вигляду-презентації для застосування перспективи
     let modelViewProjection = m4.multiply(projection, matAccum1); 
+    let normalMatrix = calculateNormalMatrix(matAccum1);
 
     // Відправляємо обчислену матрицю моделі-вигляду-презентації до шейдера
     gl.uniformMatrix4fv(shProgram.iModelViewProjectionMatrix, false, modelViewProjection);
@@ -107,6 +116,7 @@ function draw() {
     // Відправляємо матрицю моделі-вигляду без перспективи до шейдера для використання в інших обчисленнях
     gl.uniformMatrix4fv(shProgram.iModelViewMatrix, false, matAccum1);
     
+    gl.uniformMatrix4fv(shProgram.iNormalMatrix, false, normalMatrix);
     // Оновлення позиції світла
     const time = performance.now();
     const lightPosition = updateLightPosition(time);
@@ -144,19 +154,25 @@ function updateLightPosition(time) {
     return [x, y, z];
 }
 
-// Генерація даних для Richmond's Minimal Surface
+// Розрахунок матриці нормалей
+function calculateNormalMatrix(modelViewMatrix) {
+    const normalMatrix = m4.inverse(modelViewMatrix);
+    return m4.transpose(normalMatrix);
+}
+
+// Функція створення поверхні
 function CreateSurfaceData(uSteps, vSteps) {
     const vertexList = [];
     const normalList = [];
+    const tangentList = [];
     const indexList = [];
-    const uMin = -2.0;
-    const uMax = 2.0;
-    const vMin = -2.0;
-    const vMax = 2.0;
+    const texCoordList = [];
+
+    const uMin = -2.0, uMax = 2.0;
+    const vMin = -2.0, vMax = 2.0;
     const uStep = (uMax - uMin) / uSteps;
     const vStep = (vMax - vMin) / vSteps;
 
-    // Генерація вершин і нормалей
     for (let i = 0; i <= vSteps; i++) {
         for (let j = 0; j <= uSteps; j++) {
             const u = uMin + j * uStep;
@@ -166,25 +182,28 @@ function CreateSurfaceData(uSteps, vSteps) {
             const y = -Math.pow(u, 2) * v + (1 / 3) * Math.pow(v, 3) - v / (u * u + v * v);
             const z = 2 * u;
 
-            // Обчислення дотичних для розрахунку нормалі
+            vertexList.push(x, y, z);
+            
+            // Дотичні та нормалі
             const du = [
-                (u * u - v * v - 1) / (u * u + v * v),
-                (-2 * u * v) / (u * u + v * v),
-                2
+                x + (1 / 3) * Math.pow(u + uStep, 3) - (u + uStep) * Math.pow(v, 2) + (u + uStep) / ((u + uStep) ** 2 + v ** 2) - x,
+                y - Math.pow((u + uStep), 2) * v + (1 / 3) * Math.pow(v, 3) - v / ((u + uStep) ** 2 + v ** 2) - y,
+                z + 2 * (u + uStep) - z,
             ];
             const dv = [
-                (-2 * u * v) / (u * u + v * v),
-                (v * v - u * u - 1) / (u * u + v * v),
-                0
+                x + (1 / 3) * Math.pow(u, 3) - u * Math.pow(v + vStep, 2) + u / (u ** 2 + (v + vStep) ** 2) - x,
+                y - Math.pow(u, 2) * (v + vStep) + (1 / 3) * Math.pow((v + vStep), 3) - (v + vStep) / (u ** 2 + (v + vStep) ** 2) - y,
+                z + 2 * u - z,
             ];
             const normal = normalize(cross(du, dv));
 
-            vertexList.push(x, y, z);
-            normalList.push(normal[0], normal[1], normal[2]);
+            normalList.push(...normal);
+            tangentList.push(...normalize(du));
+
+            texCoordList.push(j / uSteps, i / vSteps);
         }
     }
 
-    // Генерація індексів
     for (let i = 0; i < vSteps; i++) {
         for (let j = 0; j < uSteps; j++) {
             const idx1 = i * (uSteps + 1) + j;
@@ -192,21 +211,12 @@ function CreateSurfaceData(uSteps, vSteps) {
             const idx3 = idx1 + (uSteps + 1);
             const idx4 = idx3 + 1;
 
-            indexList.push(idx1, idx2, idx3, idx2, idx4, idx3); // Два трикутники
+            indexList.push(idx1, idx2, idx3, idx2, idx4, idx3);
         }
     }
-    // Координати для текстур
-    const texCoordList = [];
-    for (let i = 0; i <= vSteps; i++) {
-        for (let j = 0; j <= uSteps; j++) {
-            const u = j / uSteps;
-            const v = i / vSteps;
-            texCoordList.push(u, v);
-        }
-    }
-    return { vertexList, normalList, indexList, texCoordList  };
-}
 
+    return { vertexList, normalList, tangentList, indexList, texCoordList };
+}
 // Нормалізація вектора
 function normalize(vector) {
     const length = Math.sqrt(vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]);
@@ -268,6 +278,12 @@ function updateSurface() {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, surface.iIndexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(data.indexList), gl.STATIC_DRAW);
 
+    gl.bindBuffer(gl.ARRAY_BUFFER, surface.iTexCoordBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.texCoordList), gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, surface.iTangentBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data.tangentList), gl.STATIC_DRAW);
+
     // Оновлення кількості індексів
     surface.count = data.indexList.length;
 
@@ -310,10 +326,10 @@ function initGL() {
     }
 
     // Завантаження текстур
-    const diffuseTexture = loadTexture(gl, 'diffuse.png');
-    const specularTexture = loadTexture(gl, 'specular.png');
-    const normalTexture = loadTexture(gl, 'normal.png');
-    if (!diffuseTexture || !specularTexture || !normalTexture) {
+    const diffuseMap = loadTexture(gl, 'diffuse.png');
+    const specularMap = loadTexture(gl, 'specular.png');
+    const normalMap = loadTexture(gl, 'normal.png');
+    if (!diffuseMap || !specularMap || !normalMap) {
         console.error("Не вдалося завантажити текстури");
         return;
     }
@@ -327,6 +343,8 @@ function initGL() {
     shProgram.iAttribNormal = gl.getAttribLocation(prog, 'normal');
     shProgram.iModelViewProjectionMatrix = gl.getUniformLocation(prog, 'ModelViewProjectionMatrix');
     shProgram.iModelViewMatrix = gl.getUniformLocation(prog, 'ModelViewMatrix');
+    shProgram.iNormalMatrix = gl.getUniformLocation(prog, 'NormalMatrix');
+    shProgram.iAttribTangent = gl.getAttribLocation(prog, 'tangent');
     shProgram.iColor = gl.getUniformLocation(prog, 'color');
     shProgram.iLightPosition = gl.getUniformLocation(prog, 'lightPosition');
     shProgram.iViewPosition = gl.getUniformLocation(prog, 'viewPosition');
@@ -335,9 +353,9 @@ function initGL() {
     shProgram.iShininess = gl.getUniformLocation(prog, 'shininess');
 
     // Перевірка юніформів текстур
-    const diffuseLocation = gl.getUniformLocation(prog, 'diffuseTexture');
-    const specularLocation = gl.getUniformLocation(prog, 'specularTexture');
-    const normalLocation = gl.getUniformLocation(prog, 'normalTexture');
+    const diffuseLocation = gl.getUniformLocation(prog, 'diffuseMap');
+    const specularLocation = gl.getUniformLocation(prog, 'specularMap');
+    const normalLocation = gl.getUniformLocation(prog, 'normalMap');
 
     if (!diffuseLocation || !specularLocation || !normalLocation) {
         console.error("Юніформи текстур не знайдено");
@@ -346,15 +364,15 @@ function initGL() {
 
     // Прив'язка текстур
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, diffuseTexture);
+    gl.bindTexture(gl.TEXTURE_2D, diffuseMap);
     gl.uniform1i(diffuseLocation, 0);
 
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, specularTexture);
+    gl.bindTexture(gl.TEXTURE_2D, specularMap);
     gl.uniform1i(specularLocation, 1);
 
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, normalTexture);
+    gl.bindTexture(gl.TEXTURE_2D, normalMap);
     gl.uniform1i(normalLocation, 2);
 
     // Ініціалізація моделі
@@ -369,10 +387,6 @@ function initGL() {
     // Увімкнення глибини
     gl.enable(gl.DEPTH_TEST);
 }
-
-
-
-
 
 // Створення програми шейдерів
 function createProgram(gl, vShader, fShader) {

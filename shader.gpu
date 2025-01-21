@@ -1,31 +1,44 @@
 // Вершинний шейдер
 const vertexShaderSource = `
-attribute vec3 vertex;           // Вершина об'єкта
-attribute vec3 normal;           // Нормаль до поверхні
-attribute vec2 texCoord;         // Текстурні координати
+attribute vec3 vertex;        // Вершинні координати
+attribute vec3 normal;        // Нормаль
+attribute vec3 tangent;       // Тангенс
+attribute vec2 texCoord;      // Текстурні координати
 
-uniform mat4 ModelViewProjectionMatrix;  // Матрична трансформація для переходу до простору кліпу
-uniform mat4 ModelViewMatrix;           // Матрична трансформація для простору моделі
-uniform mat3 NormalMatrix;              // Матрична трансформація нормалей
+varying vec3 vNormal;         // Нормаль у світовому просторі
+varying vec3 vTangent;        // Тангенс
+varying vec3 vBitangent;      // Бітангенс
+varying vec2 vTexCoord;       // Текстурні координати
+varying vec3 vFragPosition;   // Позиція фрагмента у світовому просторі
 
-varying vec3 vNormal;                 // Передача нормалей у фрагментний шейдер
-varying vec3 vPosition;               // Передача позицій вершин у фрагментний шейдер
-varying vec2 vTexCoord;               // Передача текстурних координат
+uniform mat4 ModelViewMatrix;
+uniform mat4 ModelViewProjectionMatrix;
+uniform mat4 NormalMatrix;
 
 void main() {
-    // Перетворення нормалі у простір моделі
-    vNormal = normalize(NormalMatrix * normal);
+    // Трансформація нормалі
+    vec3 transformedNormal = normalize((NormalMatrix * vec4(normal, 0.0)).xyz);
 
-    // Обчислення позиції вершини у просторі моделі
-    vPosition = (ModelViewMatrix * vec4(vertex, 1.0)).xyz;
+    // Ортогоналізація тангенса відносно нормалі (Грам-Шмідт)
+    vec3 transformedTangent = tangent - dot(tangent, transformedNormal) * transformedNormal;
+    transformedTangent = normalize(transformedTangent);
 
-    // Передача текстурних координат
+    // Обчислення бітангенса
+    vec3 transformedBitangent = cross(transformedNormal, transformedTangent);
+
+    // Передача в фрагментний шейдер
+    vNormal = transformedNormal;
+    vTangent = transformedTangent;
+    vBitangent = transformedBitangent;
     vTexCoord = texCoord;
 
-    // Перетворення вершини у простір кліпу для малювання
+    // Позиція фрагмента
+    vec4 fragPosition = ModelViewMatrix * vec4(vertex, 1.0);
+    vFragPosition = fragPosition.xyz;
+
+    // Позиція вершини
     gl_Position = ModelViewProjectionMatrix * vec4(vertex, 1.0);
 }
-
 `;
 
 // Фрагментний шейдер
@@ -35,46 +48,44 @@ const fragmentShaderSource = `
 #else
    precision mediump float;
 #endif
+varying vec3 vNormal;
+varying vec3 vTangent;
+varying vec3 vBitangent;
+varying vec2 vTexCoord;
+varying vec3 vFragPosition;
 
-uniform sampler2D diffuseTexture;  // Дифузна текстура
-uniform sampler2D specularTexture; // Текстура спекулярності
-uniform sampler2D normalTexture;   // Текстура нормалей
+uniform vec3 lightPosition;    // Позиція джерела світла
+uniform vec3 viewPosition;   // Позиція камери
 
-uniform vec3 lightPosition;         // Позиція джерела світла
-uniform vec3 viewPosition;          // Позиція спостерігача
-uniform float ambientStrength;      // Сила ambient освітлення
-uniform float specularStrength;     // Сила спекулярного освітлення
-uniform float shininess;            // Шорсткість поверхні
-
-varying vec3 vNormal;               // Інтерпольовані нормалі з вершини
-varying vec3 vPosition;             // Інтерпольовані позиції вершин
-varying vec2 vTexCoord;             // Інтерпольовані текстурні координати
+uniform sampler2D diffuseMap;  // Дифузна текстура
+uniform sampler2D specularMap; // Дзеркальна текстура
+uniform sampler2D normalMap;   // Нормальна текстура
 
 void main() {
-    // Отримання нормалі з нормальної текстури (в діапазоні [-1, 1])
-    vec3 normal = texture2D(normalTexture, vTexCoord).rgb * 2.0 - 1.0;
+    // Витяг нормалі з нормальної текстури
+    vec3 normalMapValue = texture2D(normalMap, vTexCoord).rgb * 2.0 - 1.0;
 
-    // Обчислення векторів
-    vec3 lightDir = normalize(lightPosition - vPosition);  // Вектор до світла
-    vec3 viewDir = normalize(viewPosition - vPosition);    // Вектор до спостерігача
+    // Трансформація нормалі з текстурного простору у світовий
+    mat3 TBN = mat3(vTangent, vBitangent, vNormal);
+    vec3 transformedNormal = normalize(TBN * normalMapValue);
 
-    // Ambient освітлення
-    vec3 ambient = ambientStrength * texture2D(diffuseTexture, vTexCoord).rgb;
+    // Освітлення
+    vec3 lightDir = normalize(lightPosition - vFragPosition);
+    vec3 viewDir = normalize(viewPosition - vFragPosition);
+    vec3 reflectDir = reflect(-lightDir, transformedNormal);
 
-    // Дифузне освітлення
-    float diff = max(dot(normal, lightDir), 0.0);
-    vec3 diffuse = diff * texture2D(diffuseTexture, vTexCoord).rgb;
+    // Дифузний компонент
+    float diff = max(dot(normalMapValue, lightDir), 0.1);
+    vec3 diffuseColor = texture2D(diffuseMap, vTexCoord).rgb;
 
-    // Спекулярне освітлення
-    vec3 reflectDir = reflect(-lightDir, normal);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
-    vec3 specular = specularStrength * spec * texture2D(specularTexture, vTexCoord).rgb;
+    // Дзеркальний компонент
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+    vec3 specularColor = texture2D(specularMap, vTexCoord).rgb;
 
-    // Підсумковий колір
-    vec3 finalColor = ambient + diffuse + specular;
+    // Фінальний колір
+    vec3 finalColor = diff * diffuseColor + spec * specularColor;
 
-    gl_FragColor = vec4(finalColor, 1.0);  // Піксельний колір
+    gl_FragColor = vec4(finalColor, 1.0);
 }
-
 `;
 
